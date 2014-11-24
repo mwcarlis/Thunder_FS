@@ -23,7 +23,19 @@ Unmount:				$ sudo unmount -v dir_test
 
 
 ###########	UNIT TESTS ###########
+<<<<<<< HEAD
+=======
+All unit tests depend on a the directory Thunder_FS/dir_test 
+$mkdir ./dir_test
+>>>>>>> Initial commit of test_file_mkrm.py
 
 -- Mount Test:
 Use $ sudo ./test_mount.py 
 	to test 100 mount/umount sequences
+<<<<<<< HEAD
+=======
+
+-- File Creation/Removal Test:
+Use $ sudo ./test_file_mkrm.py
+	to test 100 touch/rm sequences
+>>>>>>> Initial commit of test_file_mkrm.py

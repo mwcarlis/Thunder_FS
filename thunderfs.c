@@ -24,12 +24,12 @@ static struct super_operations thunder_s_ops = {
         .show_options   = generic_show_options,
 };
 
-static ssize_t thunder_read(struct file *filp, char *buf, size_t count, loff_t *offset){
+static ssize_t thunder_read(struct file *filp, char __user *buf, size_t count, loff_t *offset){
         printk(KERN_INFO "thunder_read\n");
         return 0;
 }
 
-static ssize_t thunder_write(struct file *filp, char *buf, size_t count, loff_t *offset){
+static ssize_t thunder_write(struct file *filp, const char __user *buf, size_t count, loff_t *offset){
         printk(KERN_INFO "thunder_write\n");
         return 0;
 }
@@ -43,6 +43,7 @@ const struct file_operations thunder_file_operations = {
         .read           = thunder_read,
         .write          = thunder_write,
         .open           = thunder_open,
+        .fsync          = noop_fsync,
 };
 
 const struct inode_operations thunder_file_inode_operations = {
@@ -58,10 +59,20 @@ static int thunder_create(struct inode *dir, struct dentry *dentry,
         printk(KERN_INFO "Returning thunder_create\n");
 }
 
+static int thunder_rmdir(struct inode *dir, struct dentry *dentry){
+        simple_rmdir(dir, dentry);
+        printk(KERN_INFO "Returning thunder rmdir\n");
+        return 0;
+}
+
 const struct inode_operations thunder_dir_inode_operations = {
         .create         = thunder_create,
         .mknod          = thunder_mknod,
+        .link           = simple_link,
         .lookup         = simple_lookup,
+        .unlink         = simple_unlink,
+        .rename         = simple_rename,
+        .rmdir          = thunder_rmdir,
 };
 
 // ---------------------------------------
@@ -118,23 +129,20 @@ static int thunder_mknod(struct inode *dir, struct dentry *dentry,
 
 static int thunder_fill_super(struct super_block *sb, void *data, int silent){
         struct inode *root;
-        struct dentry *root_dentry;
+
+        save_mount_options(sb, data);
+        //sb->s_maxbytes = MAX_LFS_FILESIZE;
         sb->s_magic = THUNDER_MAGIC;
         sb->s_op = &thunder_s_ops;
+        sb->s_time_gran = 1;
 
         root = thunder_make_inode(sb, NULL, S_IFDIR | 0755, 0);
-        if(!root){
+
+        sb->s_root = d_make_root(root);
+        if(!sb->s_root){
                 return -ENOMEM;
         }
-        //root->i_op  = &simple_dir_inode_operations;
-        //root->i_fop = &simple_dir_operations;
 
-        root_dentry = d_make_root(root);
-        if(!root_dentry){
-                iput(root);
-        }else{
-                sb->s_root = root_dentry;
-        }
         printk(KERN_INFO "Fill Super\n");
         return 0;
 }
@@ -153,14 +161,19 @@ static void thunder_kill_sb(struct super_block *sb){
 }
 
 static struct file_system_type thunder_type = {
-        .owner          = THIS_MODULE,
         .name           = "thunderfs",
         .mount          = thunder_mount,
         .kill_sb        = thunder_kill_sb,
+        .fs_flags       = FS_USERNS_MOUNT,
 };
 
-int init_mod(void) // Required to insmod
+int __init init_mod(void) // Required to insmod
 {
+        static unsigned long once;
+
+        if (test_and_set_bit(0, &once))
+                return 0;
+
         printk(KERN_INFO "Hello Cruel World\n");
         return register_filesystem(&thunder_type);
 }

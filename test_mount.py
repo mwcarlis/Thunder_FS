@@ -16,6 +16,14 @@ def print_err(out, err):
         print 'len(err): {}'.format(len(err))
     print '____________________'
 
+def run_cmds(cmd, expected_out):
+    child = Popen(cmd.split(' '), stdout=PIPE, stderr=PIPE)
+    out, err = child.communicate()
+    if expected_out not in out or len(err) > 0:
+        print_err(out, err)
+        return False
+    print_err(out, False)
+    return True
 
 def run_stat(opt):
     if opt == 'mount':
@@ -25,36 +33,19 @@ def run_stat(opt):
     else:
         return False
     cmd = 'stat -f -c %T {}'.format( root_path )
-    child = Popen(cmd.split(' '), stdout=PIPE, stderr=PIPE)
-    out, err = child.communicate()
-    if expected not in out or len(err) > 0:
-        print_err(out, err)
-        return False
-    print_err(out, False)
-    return True
+    run_cmds(cmd, expected)
+
 
 def run_mount():
     expected = '/dev/ram5 on {}/{} type thunderfs (rw)'.format( os.getcwd(), file_name)
     cmd = 'mount -v -t thunderfs /dev/ram5 {}'.format( root_path )
-    child = Popen(cmd.split(' '), stdout=PIPE, stderr=PIPE)
-    out, err = child.communicate()
-    if expected not in out or len(err) > 0:
-        print_err(out, err)
-        return False
-    print_err(out, False)
-    return True
+    run_cmds(cmd, expected)
 
 
 def run_umount():
     expected = '/dev/ram5 has been unmounted'
     cmd = 'umount -v {}'.format( root_path )
-    child = Popen(cmd.split(' '), stdout=PIPE, stderr=PIPE)
-    out, err = child.communicate()
-    if expected not in out or len(err) > 0:
-        print_err(out, err)
-        return False
-    print_err(out, False)
-    return True
+    run_cmds(cmd, expected)
 
 
 def main():
