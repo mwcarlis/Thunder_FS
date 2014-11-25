@@ -31,7 +31,7 @@ static ssize_t thunder_read(struct file *filp, char __user *buf, size_t count, l
 
 static ssize_t thunder_write(struct file *filp, const char __user *buf, size_t count, loff_t *offset){
         printk(KERN_INFO "thunder_write\n");
-        return 0;
+        return -EPERM;
 }
 
 static int thunder_open(struct inode *inod, struct file* filp){

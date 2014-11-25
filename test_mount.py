@@ -16,24 +16,38 @@ def print_err(out, err):
         print 'len(err): {}'.format(len(err))
     print '____________________'
 
-def run_cmds(cmd, expected_out):
+def run_cmds(cmd, expected_out, check_exp=True):
     child = Popen(cmd.split(' '), stdout=PIPE, stderr=PIPE)
     out, err = child.communicate()
-    if expected_out not in out or len(err) > 0:
-        print_err(out, err)
-        return False
-    print_err(out, False)
-    return True
+    if check_exp:
+        if expected_out not in out or len(err) > 0:
+            print_err(out, err)
+            return err, False
+        print_err(out, False)
+    return out, True
+
+expected_fs_type = None
+def set_expected():
+    global expected_fs_type
+    if expected_fs_type is None:
+        out, status = run_cmds('stat -f -c %T /home', '', False)
+        if not status:
+            print 'ERROR Determining default FS Type'
+            sys.exit(1)
+        expected_fs_type = out.rstrip('\n')
+        print 'Init Config: {}'.format(expected_fs_type)
+    return expected_fs_type
+
 
 def run_stat(opt):
     if opt == 'mount':
         expected = 'UNKNOWN (0x69ff69ff)'
     elif opt == 'umount':
-        expected = 'ext2/ext3'
+        expected = set_expected()
     else:
         return False
     cmd = 'stat -f -c %T {}'.format( root_path )
-    run_cmds(cmd, expected)
+    return run_cmds(cmd, expected)[1]
 
 
 def run_mount():
@@ -51,7 +65,7 @@ def run_umount():
 def main():
     if run_stat('umount') is False:
         print 'HAULT BEFORE TEST START.'
-        print 'stat -f -c %T {} != ext2/ext3'.format( root_path )
+        print 'stat -f -c %T {} != {}'.format( file_name, set_expected() )
         sys.exit(1)
     iterations = 100
     time = 1
@@ -88,15 +102,19 @@ def main():
         print '\n############ TEST FAILURE ############'
 
 if __name__ == '__main__':
-
+    interrupt = False
     try:
         main()
+    except EOFError:
+        interrupt = True
     except KeyboardInterrupt:
-        if run_stat('umount') is False:
-            print '\n############ WARNING ############'
-            print 'STUCK ON thunderfs'
-            print 'USER INTERVENTION REQUIRED'
-            print '############ WARNING ############'
+        interrupt = True
+
+    if interrupt and run_stat('umount') is False:
+        print '\n############ WARNING ############'
+        print 'STUCK ON thunderfs'
+        print 'USER INTERVENTION REQUIRED'
+        print '############ WARNING ############'
 
 
 

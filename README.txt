@@ -14,6 +14,14 @@ This means you must be root user to modify this directory.
 To Enter Root:
 $ sudo -i
 
+########### BUILD Socket ###########
+$ make
+
+1. You must load thunderlink.ko into the kernel.
+2. tail -f /var/log/syslog
+3. ./user_thunder.o
+
+
 
 
 ########### MOUNT / UNMMOUNT Module  ###########

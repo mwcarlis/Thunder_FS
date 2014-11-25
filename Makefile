@@ -23,7 +23,11 @@ clean:
 	rm -f thunderfs.ko; \
 	rm -f thunderfs.mod.c; \
 	rm -f thunderfs.mod.o; \
-	rm -f thunderfs.o;
+	rm -f thunderfs.o; \
+	rm -f .thunderfs.ko.cmd; \
+	rm -f .thunderfs.mod.o.cmd; \
+	rm -f .thunderfs.o.cmd; \
+	rm -rf .tmp_versions;
 
 
 
@@ -34,7 +38,7 @@ clean:
 	rm -f $*.ko; \
 	rm -f $*.mod.c; \
 	rm -f $*.mod.o; \
-	rm -f $*.o;
+	rm -f $*.o; \
 
 %Test:
 	@echo $@
