@@ -121,7 +121,41 @@ int get_family_id(int sd)
         return id;
 }
 
+struct cmd_type {
+        struct nlmsghdr n;
+        struct genlmsghdr g;
+        char buf[256];
+};
 
+// A function to initialize cmd_types
+int init_cmd(struct cmd_type *this_cmd, int cmd_opt, int id){
+        this_cmd->n.nlmsg_len = NLMSG_LENGTH(GENL_HDRLEN);
+        this_cmd->n.nlmsg_type = id;
+        this_cmd->n.nlmsg_flags = NLM_F_REQUEST;
+        this_cmd->n.nlmsg_seq = 60;
+        this_cmd->n.nlmsg_pid = getpid();
+        this_cmd->g.cmd = cmd_opt; // THUNDER_C_OPEN
+}
+
+// A Function to send to the thunderfs sockets in kernel space.
+int send_to_thunderfs(struct cmd_type *this_cmd, int cmd_type, 
+                                        char *message, int mlength){
+        struct nlattr *na;
+        struct sockaddr_nl nladdr;
+        int r;
+        na = (struct nlattr*) GENLMSG_DATA(this_cmd);
+        na->nla_type = cmd_type;
+        na->nla_len = mlength+NLA_HDRLEN;
+        memcpy(NLA_DATA(na), message, mlength);
+        this_cmd->n.nlmsg_len += NLMSG_ALIGN(na->nla_len);
+
+        memset(&nladdr, 0, sizeof(nladdr));
+        nladdr.nl_family = AF_NETLINK;
+
+        r = sendto(nl_sd, (char *)this_cmd, this_cmd->n.nlmsg_len, 0,
+                (struct sockaddr *)&nladdr, sizeof(nladdr));
+        return r;
+}
 
 int main(){
         nl_sd = create_nl_socket(NETLINK_GENERIC, 0);
@@ -131,39 +165,33 @@ int main(){
                 return 0;
         }
         int id = get_family_id(nl_sd);
-
-        struct {
-                struct nlmsghdr n;
-                struct genlmsghdr g;
-                char buf[256];
-        } req;
+        struct cmd_type open_cmd;
+        struct cmd_type read_cmd;
+        struct cmd_type write_cmd;
 
         struct nlattr *na;
 
-        req.n.nlmsg_len = NLMSG_LENGTH(GENL_HDRLEN);
-        req.n.nlmsg_type = id;
-        req.n.nlmsg_flags = NLM_F_REQUEST;
-        req.n.nlmsg_seq = 60;
-        req.n.nlmsg_pid = getpid();
-        req.g.cmd = 1; // THUNDER_C_OPEN
+        init_cmd(&open_cmd, 1, id);
+        init_cmd(&read_cmd, 2, id);
+        init_cmd(&write_cmd, 3, id);
         
-        // Compose Message
-        na = (struct nlattr *) GENLMSG_DATA(&req);
-        na->nla_type = 1;
+        //----------------------------------- Open Command
         char * message = "Hello World!";
         int mlength = 14;
-        na->nla_len = mlength+NLA_HDRLEN;
-        memcpy(NLA_DATA(na), message, mlength);
-        req.n.nlmsg_len += NLMSG_ALIGN(na->nla_len);
+        send_to_thunderfs(&open_cmd, 1, message, mlength);
 
-        // send message
-        struct sockaddr_nl nladdr;
-        int r;
+        
+        //----------------------------------- Read Command
+        char * jmessage = "Jello World!";
+        int jlength = 14;
+        send_to_thunderfs(&read_cmd, 2, jmessage, jlength);
 
-        memset(&nladdr, 0, sizeof(nladdr));
-        nladdr.nl_family = AF_NETLINK;
-        r = sendto(nl_sd, (char *)&req, req.n.nlmsg_len, 0,
-                (struct sockaddr *)&nladdr, sizeof(nladdr));
+        //----------------------------------- Write Command
+        char * pmessage = "Mello Herld!";
+        int plength = 14;
+        send_to_thunderfs(&write_cmd, 3, pmessage, plength);
+
+
         printf("Thats all folks\n");
         return 0;
 

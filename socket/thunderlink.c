@@ -4,11 +4,16 @@
 
 // Annoying depends
 int thunder_open(struct sk_buff *skb_2, struct genl_info *info);
+int thunder_write(struct sk_buff *skb_2, struct genl_info *info);
+int thunder_read(struct sk_buff *skb_2, struct genl_info *info);
+
 
 // attributes (variables): 
 enum {
         THUNDER_A_UNSPEC,
         THUNDER_A_OPEN,
+        THUNDER_A_READ,
+        THUNDER_A_WRITE,
                 __THUNDER_A_MAX,
 };
 #define THUNDER_A_MAX (__THUNDER_A_MAX - 1) 
@@ -16,22 +21,39 @@ enum {
 // Attribute policy.
 static struct nla_policy thunder_genl_policy[THUNDER_A_MAX + 1] = {
         [THUNDER_A_OPEN] = {.type = NLA_NUL_STRING},
+        [THUNDER_A_READ] = {.type = NLA_NUL_STRING},
+        [THUNDER_A_WRITE] = {.type = NLA_NUL_STRING},
 };
 
 // Commands: used by userspace applications
 enum {
         THUNDER_C_UNSPEC,
         THUNDER_C_OPEN,
+        THUNDER_C_READ,
+        THUNDER_C_WRITE,
                 __THUNDER_C_MAX,
 };
 #define THUNDER_C_MAX (__THUNDER_C_MAX - 1)
 
-struct genl_ops thunder_gnl_ops_open = {
-        .cmd = THUNDER_C_OPEN,
-        .flags = 0,
-        .policy = thunder_genl_policy,
-        .doit = thunder_open,
-        .dumpit = NULL,
+struct genl_ops thunder_gnl_ops[] = {
+        {       .cmd = THUNDER_C_OPEN,
+                .flags = 0,
+                .policy = thunder_genl_policy,
+                .doit = thunder_open,
+                .dumpit = NULL,
+        }, {
+                .cmd = THUNDER_C_READ, 
+                .flags = 0, 
+                .policy = thunder_genl_policy, 
+                .doit = thunder_read, 
+                .dumpit = NULL, 
+        }, {
+                .cmd = THUNDER_C_WRITE, 
+                .flags = 0, 
+                .policy = thunder_genl_policy, 
+                .doit = thunder_write, 
+                .dumpit = NULL, 
+        },
 };
 
 #define VERSION_NR 1
@@ -44,18 +66,9 @@ static struct genl_family thunder_gnl_family = {
         .maxattr = THUNDER_A_MAX,       // 
 };
 
-int thunder_open(struct sk_buff *skb_2, struct genl_info *info){
-        //struct nlattr *na;
-        //struct sk_buff *skb;
-        //int rc;
-        struct nlattr *na;
-        char *mydata;
-        if (info == NULL){
-                printk(KERN_INFO "Got a Null gen_info *info\n");
-                return 0;
-        }
 
-        na = info->attrs[THUNDER_A_OPEN];
+void check_received(struct nlattr * na, int cmd){
+        char *mydata;
         if(na){
                 mydata = (char *)nla_data(na);
                 if(mydata == NULL){
@@ -65,23 +78,75 @@ int thunder_open(struct sk_buff *skb_2, struct genl_info *info){
                         printk(KERN_INFO "Received: %s\n", mydata);
                 }
         }else{
-                printk(KERN_INFO "Error no info->attrs %i\n", THUNDER_A_OPEN);
+                printk(KERN_INFO "Error no info->attrs %i\n", cmd);
         }
+}
+
+
+int thunder_open(struct sk_buff *skb_2, struct genl_info *info){
+        struct nlattr *na;
+        int open_cmd = THUNDER_A_OPEN;
+        if (info == NULL){
+                printk(KERN_INFO "Got a Null gen_info *info\n");
+                return 0;
+        }
+
+        na = info->attrs[open_cmd];
+
+        // Test Function
+        check_received(na, open_cmd);
+
         printk(KERN_INFO "Thunder_Open Kernal To User\n");
         return 0;
 }
 
+int thunder_write(struct sk_buff *skb_2, struct genl_info *info){
+        struct nlattr *na;
+        int open_cmd = THUNDER_A_WRITE;
+        if (info == NULL){
+                printk(KERN_INFO "Got a Null gen_info *info\n");
+                return 0;
+        }
 
+        na = info->attrs[open_cmd];
+
+        // Test Function
+        check_received(na, open_cmd);
+
+        printk(KERN_INFO "Thunder_Write Kernal To User\n");
+        return 0;
+}
+
+int thunder_read(struct sk_buff *skb_2, struct genl_info *info){
+        struct nlattr *na;
+        int open_cmd = THUNDER_A_READ;
+        if (info == NULL){
+                printk(KERN_INFO "Got a Null gen_info *info\n");
+                return 0;
+        }
+
+        na = info->attrs[open_cmd];
+
+        // Test Function
+        check_received(na, open_cmd);
+
+        printk(KERN_INFO "Thunder_Read Kernal To User\n");
+        return 0;
+}
 
 int __init init_mod(void) // Required to insmod
 {
         int rc;
         struct genl_family *init = &thunder_gnl_family;
-        struct genl_ops *init_ops = &thunder_gnl_ops_open;
+        struct genl_ops *init_ops = thunder_gnl_ops;
         init->ops = init_ops;
-        init->n_ops = 1;
-
+        init->n_ops = 4;
         rc = genl_register_family(init);
+
+
+        //genl_register_family_with_ops_grups(&thunder_gnl_family,
+                                //&thunder_gnl_ops, NULL);
+
         if(rc != 0){
                 printk(KERN_INFO "Register Ops: %i\n", rc);
                 genl_unregister_family(init);

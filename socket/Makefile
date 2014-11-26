@@ -15,7 +15,7 @@ build: user_thunder.o
 %.o: %.c
 	gcc $*.c -o $*.o
 
-.PHONY: %Clean
+.PHONY: %clean
 clean:
 	@rm -f modules.order; \
 	rm -f Module.symvers; \
