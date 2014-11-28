@@ -1,8 +1,4 @@
 
-#WARN 	:= -W -Wall -Wstrict-prototypes -Wmissing-prototypes
-#INCLUDE := -isystem /lib/modules/`uname -r`/build/include
-#CFLAGS 	:= -O2 -DMODULE -D__KERNEL__${WARN} ${INCLUDE}
-#CC 	:= gcc
 KERNELDIR ?= /lib/modules/$(shell uname -r)/build
 PWD := $(shell pwd)
 obj-m := thunderlink.o
@@ -13,7 +9,7 @@ build: user_thunder.o
 	$(MAKE) -C $(KERNELDIR) M=$(PWD) modules
 
 %.o: %.c
-	gcc $*.c -o $*.o
+	gcc -g $*.c -o $*.o
 
 .PHONY: %clean
 clean:

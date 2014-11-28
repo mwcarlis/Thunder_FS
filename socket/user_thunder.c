@@ -142,7 +142,9 @@ int send_to_thunderfs(struct cmd_type *this_cmd, int cmd_type,
                                         char *message, int mlength){
         struct nlattr *na;
         struct sockaddr_nl nladdr;
+        struct cmd_type ans;
         int r;
+        int rep_len;
         na = (struct nlattr*) GENLMSG_DATA(this_cmd);
         na->nla_type = cmd_type;
         na->nla_len = mlength+NLA_HDRLEN;
@@ -154,12 +156,59 @@ int send_to_thunderfs(struct cmd_type *this_cmd, int cmd_type,
 
         r = sendto(nl_sd, (char *)this_cmd, this_cmd->n.nlmsg_len, 0,
                 (struct sockaddr *)&nladdr, sizeof(nladdr));
-        return r;
+        
+        return 0;
+       // return get_from_thunderfs(this_cmd, cmd_type);
 }
 
+// A Function to send to the thunderfs sockets in kernel space.
+int get_from_thunderfs(struct cmd_type *this_cmd, int cmd_type, char *ret_message /*, 
+                                        char *message, int mlength*/){
+        struct nlattr *na;
+        struct cmd_type ans;
+        struct sockaddr_nl nladdr;
+        int r;
+        int rep_len;
+        na = (struct nlattr*) GENLMSG_DATA(this_cmd);
+        na->nla_type = cmd_type;
+        //na->nla_len = mlength+NLA_HDRLEN;
+        //memcpy(NLA_DATA(na), message, mlength);
+        this_cmd->n.nlmsg_len += NLMSG_ALIGN(na->nla_len);
+
+        memset(&nladdr, 0, sizeof(nladdr));
+        nladdr.nl_family = AF_NETLINK;
+
+        r = recv(nl_sd, &ans, sizeof(ans), 0);
+        if(ans.n.nlmsg_type == NLMSG_ERROR ) {
+                printf("Error Received NACK - leaving \n");
+                return -1;
+        } if ( rep_len < 0 ){
+                printf("error received reply msg \n");
+                return -1;
+
+        } if ( !NLMSG_OK((&ans.n), rep_len )) {
+                printf("invalid reply message received\n");
+                return -1;
+        }
+
+        rep_len = GENLMSG_PAYLOAD(&ans.n);
+        na = (struct nlattr *) GENLMSG_DATA(&ans);
+        char * result = (char *) NLA_DATA(na);
+        printf("Kernel Says: %s\n", result);
+        //*ret_message = result;
+        return 0;
+}
+
+//void user_state_machine(void){
+//}
+
+#define OPEN_CMD 1
+#define READ_CMD 2
+#define WRITE_CMD 3
+#define STATE_CMD 4
 int main(){
         nl_sd = create_nl_socket(NETLINK_GENERIC, 0);
-        
+        printf("nl_sd: %i\n", nl_sd);
         if(nl_sd < 0){
                 printf("Create Failure\n");
                 return 0;
@@ -168,29 +217,43 @@ int main(){
         struct cmd_type open_cmd;
         struct cmd_type read_cmd;
         struct cmd_type write_cmd;
+        struct cmd_type state_cmd;
 
         struct nlattr *na;
 
-        init_cmd(&open_cmd, 1, id);
-        init_cmd(&read_cmd, 2, id);
-        init_cmd(&write_cmd, 3, id);
+        init_cmd(&open_cmd, OPEN_CMD, id);
+        init_cmd(&read_cmd, READ_CMD, id);
+        init_cmd(&write_cmd, WRITE_CMD, id);
+        init_cmd(&state_cmd, STATE_CMD, id);
         
+        //----------------------------------- STATE Command
+        char *mes = "Initialize";
+        char *rv;
+        int meslength = 12;
+        printf("New Cmd:\n");
+        send_to_thunderfs(&state_cmd, STATE_CMD, mes, meslength);
+        get_from_thunderfs(&state_cmd, STATE_CMD, rv);
+        //if (rv == "YAYMAN"){
+        //        printf( "Confirmed\n");
+        //}
+        printf("\n\n");
+
         //----------------------------------- Open Command
         char * message = "Hello World!";
         int mlength = 14;
-        send_to_thunderfs(&open_cmd, 1, message, mlength);
-
+        printf("Open Cmd:\n");
+        send_to_thunderfs(&open_cmd, OPEN_CMD, message, mlength);
+        get_from_thunderfs(&open_cmd, OPEN_CMD, rv);
         
         //----------------------------------- Read Command
-        char * jmessage = "Jello World!";
-        int jlength = 14;
-        send_to_thunderfs(&read_cmd, 2, jmessage, jlength);
+        //char * jmessage = "Jello World!";
+        //int jlength = 14;
+        //send_to_thunderfs(&read_cmd, READ_CMD, jmessage, jlength);
 
         //----------------------------------- Write Command
-        char * pmessage = "Mello Herld!";
-        int plength = 14;
-        send_to_thunderfs(&write_cmd, 3, pmessage, plength);
-
+        //char * pmessage = "Mello Herld!";
+        //int plength = 14;
+        //send_to_thunderfs(&write_cmd, WRITE_CMD, pmessage, plength);
 
         printf("Thats all folks\n");
         return 0;

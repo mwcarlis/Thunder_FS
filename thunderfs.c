@@ -7,6 +7,7 @@
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/fs.h>
+#include "./socket/thunderlink.c"
 
 #define THUNDER_MAGIC 0x69FF69FF
 static int thunder_mknod(struct inode *dir, struct dentry *dentry, 
@@ -35,6 +36,8 @@ static ssize_t thunder_write(struct file *filp, const char __user *buf, size_t c
 }
 
 static int thunder_open(struct inode *inod, struct file* filp){
+
+        //thunder_send_to_user();
         printk(KERN_INFO "thunder_open\n");
         return 0;
 }
@@ -167,20 +170,53 @@ static struct file_system_type thunder_type = {
         .fs_flags       = FS_USERNS_MOUNT,
 };
 
+int init_socket(void)
+{
+        int rc;
+        struct genl_family *init = &thunder_gnl_family;
+        struct genl_ops *init_ops = thunder_gnl_ops;
+        init->ops = init_ops;
+        printk(KERN_INFO "T_A_MAX: %i\n", THUNDER_A_MAX);
+        init->n_ops = 4;
+        rc = genl_register_family(init);
+        if( rc != 0 ){
+                printk(KERN_INFO "Register Ops: %i\n", rc);
+                genl_unregister_family(init);
+                printk(KERN_INFO "An Error Occured with insmod\n");
+                return -1;
+        }
+        return 0;
+
+}
+
 int __init init_mod(void) // Required to insmod
 {
         static unsigned long once;
-
+        int rv = init_socket();
+        if(rv != 0 ){
+                return -1;
+        }
         if (test_and_set_bit(0, &once))
                 return 0;
 
         printk(KERN_INFO "Hello Cruel World\n");
         return register_filesystem(&thunder_type);
+
 }
 
 void clean_mod(void) // Required for rmmod
 {
-        unregister_filesystem(&thunder_type);
+        int ret;
+        ret = genl_unregister_family(&thunder_gnl_family);
+        if(ret != 0 ){
+                printk(KERN_INFO "An Error Unregistering Family\n");
+
+        }
+        ret = unregister_filesystem(&thunder_type);
+        if(ret != 0 ){
+                printk(KERN_INFO "An Error Unregistering FileSystem\n");
+
+        }
         printk(KERN_INFO "Goodbye Cruel World\n");
 }
 
@@ -190,33 +226,4 @@ module_exit(clean_mod);
 MODULE_AUTHOR("Matthew Carlis");
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("Starting fresh");
-
-
-//static struct super_block *thunder_get_super(struct file_system_type *fst, 
-//                                int flags, const char *devname, void *data){
-//        printk(KERN_INFO "Get Super");
-//        thunder_fill_super(NULL, NULL, 0);
-//        return NULL;
-//}
-
-// FFILE OPERATIONS _______________
-//static int thunder_open(struct inode *inode, struct file* filep){
-//        printk(KERN_INFO "THUNDER OPEN!\n");
-//        return 0;
-//}
-//static ssize_t thunder_read(struct file *filep, char *buf, 
-//                                size_t count, loff_t * offset){
-//        printk(KERN_INFO "THUNDER READ!\n");
-//        return 0;
-//}
-//static ssize_t thunder_write (struct file *filep, const char *buf, 
-//                                size_t count, loff_t *offset){
-//        printk(KERN_INFO "THUNDER WRITE\n");
-//        return 0;
-//}
-//static struct file_operations thunder_ops = {
-//        .open           = thunder_open,
-//        .read           = thunder_read,
-//        .write          = thunder_write,
-//};
 
