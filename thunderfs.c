@@ -26,18 +26,20 @@ static struct super_operations thunder_s_ops = {
 };
 
 static ssize_t thunder_read(struct file *filp, char __user *buf, size_t count, loff_t *offset){
+        thunder_cmd_dispatch(DISPATCH_READ, -1);
         printk(KERN_INFO "thunder_read\n");
         return 0;
 }
 
 static ssize_t thunder_write(struct file *filp, const char __user *buf, size_t count, loff_t *offset){
+        thunder_cmd_dispatch(DISPATCH_WRITE, -1);
         printk(KERN_INFO "thunder_write\n");
         return -EPERM;
 }
 
 static int thunder_open(struct inode *inod, struct file* filp){
-
-        //thunder_send_to_user();
+        unsigned long inode_id = inod->i_ino;
+        thunder_cmd_dispatch(DISPATCH_OPEN, inode_id);
         printk(KERN_INFO "thunder_open\n");
         return 0;
 }

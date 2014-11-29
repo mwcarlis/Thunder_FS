@@ -1,6 +1,7 @@
 #include <net/genetlink.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/string.h>
 
 // Annoying depends
 int thunder_open_socket(struct sk_buff *skb_2, struct genl_info *info);
@@ -166,7 +167,7 @@ int thunder_open_socket(struct sk_buff *skb_2, struct genl_info *info){
 
         // Test Function
         check_received(na, open_cmd);
-        thunder_send_to_user(&open_info, THUNDER_A_OPEN, THUNDER_C_OPEN, "Hello From Kernel Open");
+        //thunder_send_to_user(&open_info, THUNDER_A_OPEN, THUNDER_C_OPEN, "Hello From Kernel Open");
         printk(KERN_INFO "Thunder_Open Kernal To User\n");
         return 0;
 }
@@ -232,10 +233,48 @@ int thunder_state_cmd(struct sk_buff *skb_2, struct genl_info *info){
 
         check_received(na, open_cmd);
 
-        thunder_send_to_user(&state_info, THUNDER_A_MAIN, THUNDER_C_MAIN, "Hello From Kernel State Cmd");
+        //thunder_send_to_user(&state_info, THUNDER_A_MAIN, THUNDER_C_MAIN, "Hello From Kernel State Cmd");
         printk(KERN_INFO "Thunder State Cmd\n");
         return 0;
 }
+
+/*
+struct genl_info open_info;
+struct genl_info write_info;
+struct genl_info read_info;
+struct genl_info state_info; */
+
+#define DISPATCH_OPEN 1
+#define DISPATCH_READ 2
+#define DISPATCH_WRITE 3
+
+void thunder_cmd_dispatch(int cmd, unsigned long operation){
+        int CMD_A = THUNDER_A_MAIN;
+        int CMD_C = THUNDER_C_MAIN;
+        char user_cmds[2];
+        printk(KERN_INFO "CMD: %i\n", cmd);
+        if (cmd == DISPATCH_OPEN){
+                printk(KERN_INFO "Open Case\n");
+                user_cmds[0] = (char) DISPATCH_OPEN;
+                user_cmds[1] = (char) operation;
+                thunder_send_to_user(&state_info, CMD_A, CMD_C, user_cmds); 
+        } else if(cmd == DISPATCH_READ) { 
+                printk(KERN_INFO "Read Case\n");
+                user_cmds[0] = (char) DISPATCH_READ;
+                user_cmds[1] = (char) operation;
+                thunder_send_to_user(&state_info, CMD_A, CMD_C, user_cmds);
+        } else if(cmd == DISPATCH_WRITE) {
+                printk(KERN_INFO "Write Case\n");
+                user_cmds[0] = (char) DISPATCH_WRITE;
+                user_cmds[1] = (char) operation;
+                thunder_send_to_user(&state_info, CMD_A, CMD_C, user_cmds);
+        } else {
+                //thunder_send_to_user();
+                printk(KERN_INFO "Default Choice\n");
+        }
+
+}
+
 
 
 //int __init init_mod(void) // Required to insmod

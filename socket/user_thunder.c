@@ -3,7 +3,7 @@
 #include <errno.h>
 #include <unistd.h>
 #include <poll.h>
-#include <string.h>
+#include <string.h> 
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -13,6 +13,7 @@
 
 #include <linux/netlink.h>
 #include <linux/genetlink.h>
+#include "../user_thunderfs/user_thunderfs.c"
 
 #define GENLMSG_DATA(glh) ((void *)(NLMSG_DATA(glh) + GENL_HDRLEN))
 #define GENLMSG_PAYLOAD(glh) (NLMSG_PAYLOAD(glh, 0) - GENL_HDRLEN)
@@ -162,13 +163,12 @@ int send_to_thunderfs(struct cmd_type *this_cmd, int cmd_type,
 }
 
 // A Function to send to the thunderfs sockets in kernel space.
-int get_from_thunderfs(struct cmd_type *this_cmd, int cmd_type, char *ret_message /*, 
+ssize_t get_from_thunderfs(struct cmd_type *this_cmd, int cmd_type, char *ret_message /*, 
                                         char *message, int mlength*/){
         struct nlattr *na;
         struct cmd_type ans;
         struct sockaddr_nl nladdr;
-        int r;
-        int rep_len;
+        ssize_t rep_len;
         na = (struct nlattr*) GENLMSG_DATA(this_cmd);
         na->nla_type = cmd_type;
         //na->nla_len = mlength+NLA_HDRLEN;
@@ -178,7 +178,7 @@ int get_from_thunderfs(struct cmd_type *this_cmd, int cmd_type, char *ret_messag
         memset(&nladdr, 0, sizeof(nladdr));
         nladdr.nl_family = AF_NETLINK;
 
-        r = recv(nl_sd, &ans, sizeof(ans), 0);
+        rep_len = recv(nl_sd, &ans, sizeof(ans), 0);
         if(ans.n.nlmsg_type == NLMSG_ERROR ) {
                 printf("Error Received NACK - leaving \n");
                 return -1;
@@ -193,15 +193,16 @@ int get_from_thunderfs(struct cmd_type *this_cmd, int cmd_type, char *ret_messag
 
         rep_len = GENLMSG_PAYLOAD(&ans.n);
         na = (struct nlattr *) GENLMSG_DATA(&ans);
-        char * result = (char *) NLA_DATA(na);
-        printf("Kernel Says: %s\n", result);
-        //*ret_message = result;
-        return 0;
+        char * rv = (char *) NLA_DATA(na);
+        printf("Kernel Says: %i\t%i\n", (int) rv[0], (int) rv[1]);
+        return snprintf(ret_message, rep_len, "%s", rv);
+        //return rep_len;
 }
 
 //void user_state_machine(void){
 //}
 
+#define EQUAL_STRS 0
 #define OPEN_CMD 1
 #define READ_CMD 2
 #define WRITE_CMD 3
@@ -228,32 +229,64 @@ int main(){
         
         //----------------------------------- STATE Command
         char *mes = "Initialize";
-        char *rv;
+        char rv[200];
+        char ret_mes[200];
+        char filedata[4096];
+        int ret_len;
         int meslength = 12;
-        printf("New Cmd:\n");
+        int opencount = 0;
+        int readcount = 0;
+        int writecount = 0;
+        ssize_t len;
+        printf("New Cmd\n");
         send_to_thunderfs(&state_cmd, STATE_CMD, mes, meslength);
-        get_from_thunderfs(&state_cmd, STATE_CMD, rv);
-        //if (rv == "YAYMAN"){
-        //        printf( "Confirmed\n");
-        //}
-        printf("\n\n");
+        do{
+                len = get_from_thunderfs(&state_cmd, STATE_CMD, rv);
+                printf("Got Message len: %i\n", (int) len);
 
-        //----------------------------------- Open Command
-        char * message = "Hello World!";
-        int mlength = 14;
-        printf("Open Cmd:\n");
-        send_to_thunderfs(&open_cmd, OPEN_CMD, message, mlength);
-        get_from_thunderfs(&open_cmd, OPEN_CMD, rv);
-        
-        //----------------------------------- Read Command
-        //char * jmessage = "Jello World!";
-        //int jlength = 14;
-        //send_to_thunderfs(&read_cmd, READ_CMD, jmessage, jlength);
+                //if (strncmp( (char *) "OPEN", rv, len) == EQUAL_STRS){
+                if ( (int) rv[0] == OPEN_CMD){
+                        int digits;
+                        if(opencount == 10){
+                                digits = 1;
+                        }
+                        ssize_t file_len = get_file(filedata, (int) rv[1]);
+                        printf("%s\n", filedata);
 
-        //----------------------------------- Write Command
-        //char * pmessage = "Mello Herld!";
-        //int plength = 14;
-        //send_to_thunderfs(&write_cmd, WRITE_CMD, pmessage, plength);
+                        //ret_len = snprintf(ret_mes, file_len, "%s", filedata);
+                        //send_to_thunderfs(&open_cmd, OPEN_CMD, ret_mes, ret_len+2);
+                        send_to_thunderfs(&open_cmd, OPEN_CMD, filedata, file_len+2);
+                        opencount += 1;
+
+                        printf("Confirmed OPEN\n");
+                //} else if(strncmp( (char *) "READ", rv, len ) == EQUAL_STRS){
+                } else if( (int) rv[0] == READ_CMD){
+                        int digits;
+                        if(readcount == 10){
+                                digits = 1;
+                        }
+
+                        ret_len = snprintf(ret_mes, 10+digits, "READDATA%i", readcount);
+                        send_to_thunderfs(&read_cmd, READ_CMD, ret_mes, ret_len+2);
+                        readcount += 1;
+
+                        printf("Confirmed READ\n");
+                //} else if(strncmp( (char *) "WRITE", rv, len) == EQUAL_STRS){
+                } else if( (int) rv[0] == WRITE_CMD ){
+                        int digits = 0;
+                        if(writecount == 10){
+                                digits = 1;
+                        }
+
+                        ret_len = snprintf(ret_mes, 11+digits, "WRITEDATA%i", writecount);
+                        send_to_thunderfs(&write_cmd, WRITE_CMD, ret_mes, ret_len+2);
+                        writecount += 1;
+
+                        printf("Confirmed WRITE\n");
+                } else {
+                        printf("Not Confirmed\n");
+                }
+        } while(1 == 1);
 
         printf("Thats all folks\n");
         return 0;
