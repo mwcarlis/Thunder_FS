@@ -22,6 +22,9 @@
 int done = 0;
 int nl_sd; // The Socket
 
+char buff[4096];
+int buff_size;
+
 // Create Netlink Socket
 static int create_nl_socket(int protocol, int groups)
 {
@@ -159,20 +162,17 @@ int send_to_thunderfs(struct cmd_type *this_cmd, int cmd_type,
                 (struct sockaddr *)&nladdr, sizeof(nladdr));
         
         return 0;
-       // return get_from_thunderfs(this_cmd, cmd_type);
 }
 
 // A Function to send to the thunderfs sockets in kernel space.
-ssize_t get_from_thunderfs(struct cmd_type *this_cmd, int cmd_type, char *ret_message /*, 
-                                        char *message, int mlength*/){
+ssize_t get_from_thunderfs(struct cmd_type *this_cmd, 
+                                        int cmd_type, char *ret_message) {
         struct nlattr *na;
         struct cmd_type ans;
         struct sockaddr_nl nladdr;
         ssize_t rep_len;
         na = (struct nlattr*) GENLMSG_DATA(this_cmd);
         na->nla_type = cmd_type;
-        //na->nla_len = mlength+NLA_HDRLEN;
-        //memcpy(NLA_DATA(na), message, mlength);
         this_cmd->n.nlmsg_len += NLMSG_ALIGN(na->nla_len);
 
         memset(&nladdr, 0, sizeof(nladdr));
@@ -196,11 +196,7 @@ ssize_t get_from_thunderfs(struct cmd_type *this_cmd, int cmd_type, char *ret_me
         char * rv = (char *) NLA_DATA(na);
         printf("Kernel Says: %i\t%i\n", (int) rv[0], (int) rv[1]);
         return snprintf(ret_message, rep_len, "%s", rv);
-        //return rep_len;
 }
-
-//void user_state_machine(void){
-//}
 
 #define EQUAL_STRS 0
 #define OPEN_CMD 1
@@ -227,24 +223,23 @@ int main(){
         init_cmd(&write_cmd, WRITE_CMD, id);
         init_cmd(&state_cmd, STATE_CMD, id);
         
-        //----------------------------------- STATE Command
-        char *mes = "Initialize";
+        char *init = "Initialize";
+        int init_len = 12;
         char rv[200];
         char ret_mes[200];
         char filedata[4096];
         int ret_len;
-        int meslength = 12;
         int opencount = 0;
         int readcount = 0;
         int writecount = 0;
         ssize_t len;
-        printf("New Cmd\n");
-        send_to_thunderfs(&state_cmd, STATE_CMD, mes, meslength);
+
+        // Initialize the State.
+        send_to_thunderfs(&state_cmd, STATE_CMD, init, init_len);
         do{
                 len = get_from_thunderfs(&state_cmd, STATE_CMD, rv);
                 printf("Got Message len: %i\n", (int) len);
 
-                //if (strncmp( (char *) "OPEN", rv, len) == EQUAL_STRS){
                 if ( (int) rv[0] == OPEN_CMD){
                         int digits;
                         if(opencount == 10){
@@ -252,14 +247,12 @@ int main(){
                         }
                         ssize_t file_len = get_file(filedata, (int) rv[1]);
                         printf("%s\n", filedata);
+                        buff_size = get_file(buff, -99);
 
-                        //ret_len = snprintf(ret_mes, file_len, "%s", filedata);
-                        //send_to_thunderfs(&open_cmd, OPEN_CMD, ret_mes, ret_len+2);
                         send_to_thunderfs(&open_cmd, OPEN_CMD, filedata, file_len+2);
                         opencount += 1;
 
                         printf("Confirmed OPEN\n");
-                //} else if(strncmp( (char *) "READ", rv, len ) == EQUAL_STRS){
                 } else if( (int) rv[0] == READ_CMD){
                         int digits;
                         if(readcount == 10){
@@ -271,7 +264,6 @@ int main(){
                         readcount += 1;
 
                         printf("Confirmed READ\n");
-                //} else if(strncmp( (char *) "WRITE", rv, len) == EQUAL_STRS){
                 } else if( (int) rv[0] == WRITE_CMD ){
                         int digits = 0;
                         if(writecount == 10){

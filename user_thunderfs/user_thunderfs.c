@@ -6,7 +6,7 @@
 struct file_block {
         char *data;
         int used;
-        struct *file_block next_block;
+        //struct *file_block next_block;
 };
 
 struct file_system {

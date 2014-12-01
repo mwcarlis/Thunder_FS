@@ -7,13 +7,35 @@
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/fs.h>
-#include "./socket/thunderlink.c"
+#include <linux/semaphore.h>
 
 #define THUNDER_MAGIC 0x69FF69FF
+
+struct semaphore wr_open_lock;
+struct semaphore rd_open_lock;
+char open_data[4096];
+int open_size;
+
+char read_data[4096];
+int read_size;
+
+char write_data[4096];
+int write_size;
+
+char gp_buff[4096];
+int gpbuff_size;
+
+bool user_connection;
+
+#include "./socket/thunderlink.c"
+
+
+//anoying circular depends
 static int thunder_mknod(struct inode *dir, struct dentry *dentry, 
                                                 umode_t mode, dev_t dev);
 
-static int thunder_implode_inode(struct inode *thisnode){
+
+static int thunder_implode_inode(struct inode *thisnode) {
         generic_delete_inode(thisnode);
         printk(KERN_INFO "thunder_implode_inode\n");
         return 0;
@@ -25,21 +47,56 @@ static struct super_operations thunder_s_ops = {
         .show_options   = generic_show_options,
 };
 
-static ssize_t thunder_read(struct file *filp, char __user *buf, size_t count, loff_t *offset){
-        thunder_cmd_dispatch(DISPATCH_READ, -1);
+static ssize_t thunder_read(struct file *filp, char __user *buf, size_t count, loff_t *offset) {
+        unsigned long inode_id;
+
+        if( !user_connection ){
+                return -EPIPE;
+        }
+
+        inode_id = ( unsigned long ) filp->private_data;
+        down( &wr_open_lock ); // Take the lock to block on the next lock
+        thunder_cmd_dispatch(DISPATCH_OPEN, inode_id);
+        down( &wr_open_lock);
+        down( &rd_open_lock ); // Wait to receive into: char open_data
+        //printk(KERN_INFO "opening: %s", open_data);
+        printk(KERN_INFO "open_size: %i", open_size);
+
+        if(*offset > 60){
+                return 0;
+        }
+        if(count > 60 - *offset){
+                count = 60 - *offset;
+        }
+        if(copy_to_user( buf, open_data + *offset, count)){
+                printk(KERN_INFO "Bad Address\n");
+                return -EFAULT;
+        }
+        *offset += count;
+        up(&rd_open_lock);
+        up(&wr_open_lock);
         printk(KERN_INFO "thunder_read\n");
-        return 0;
+        return count;
 }
 
-static ssize_t thunder_write(struct file *filp, const char __user *buf, size_t count, loff_t *offset){
+static ssize_t thunder_write(struct file *filp, const char __user *buf, size_t count, loff_t *offset) {
+        if( !user_connection ){
+                return -EPIPE;
+        }
         thunder_cmd_dispatch(DISPATCH_WRITE, -1);
         printk(KERN_INFO "thunder_write\n");
         return -EPERM;
 }
 
-static int thunder_open(struct inode *inod, struct file* filp){
-        unsigned long inode_id = inod->i_ino;
-        thunder_cmd_dispatch(DISPATCH_OPEN, inode_id);
+static int thunder_open(struct inode *inod, struct file* filp) {
+        if( !user_connection ){
+                return -EPIPE;
+        }
+
+        printk(KERN_INFO "inode_id: %i\n", (int) inod->i_ino);
+        filp->private_data = (void*) inod->i_ino;
+        inod->i_size = 60;
+
         printk(KERN_INFO "thunder_open\n");
         return 0;
 }
@@ -56,15 +113,14 @@ const struct inode_operations thunder_file_inode_operations = {
         .getattr        = simple_getattr,
 };
 
-
 // --------------------------------------- dir_inode_operations
 static int thunder_create(struct inode *dir, struct dentry *dentry, 
-                                                umode_t mode, bool excl){
+                                                umode_t mode, bool excl) {
         return thunder_mknod(dir, dentry, mode | S_IFREG, 0);
         printk(KERN_INFO "Returning thunder_create\n");
 }
 
-static int thunder_rmdir(struct inode *dir, struct dentry *dentry){
+static int thunder_rmdir(struct inode *dir, struct dentry *dentry) {
         simple_rmdir(dir, dentry);
         printk(KERN_INFO "Returning thunder rmdir\n");
         return 0;
@@ -83,15 +139,12 @@ const struct inode_operations thunder_dir_inode_operations = {
 // ---------------------------------------
 
 static struct inode *thunder_make_inode(struct super_block *sb, 
-                const struct inode *dir, umode_t mode, dev_t dev)
-{
+                const struct inode *dir, umode_t mode, dev_t dev) {
 	struct inode *ret = new_inode(sb);
 	if (ret) {
                 ret->i_ino = get_next_ino();
 		ret->i_mode = mode;
                 inode_init_owner(ret, dir, mode);
-		//i_uid_write(ret, (uid_t) 0);
-		//i_gid_write(ret, (gid_t) 0);
 		ret->i_blocks = 0;
 		ret->i_atime = ret->i_mtime = ret->i_ctime = CURRENT_TIME;
                 switch(mode & S_IFMT){
@@ -118,7 +171,6 @@ static struct inode *thunder_make_inode(struct super_block *sb,
 // Create  a File
 static int thunder_mknod(struct inode *dir, struct dentry *dentry, 
                         umode_t mode, dev_t dev){
-
         struct inode *ret = thunder_make_inode(dir->i_sb, dir, mode, dev);
         int error = -ENOSPC;
         if(ret){
@@ -172,8 +224,7 @@ static struct file_system_type thunder_type = {
         .fs_flags       = FS_USERNS_MOUNT,
 };
 
-int init_socket(void)
-{
+int init_socket(void) {
         int rc;
         struct genl_family *init = &thunder_gnl_family;
         struct genl_ops *init_ops = thunder_gnl_ops;
@@ -188,11 +239,9 @@ int init_socket(void)
                 return -1;
         }
         return 0;
-
 }
 
-int __init init_mod(void) // Required to insmod
-{
+int __init init_mod(void) { // Required to insmod
         static unsigned long once;
         int rv = init_socket();
         if(rv != 0 ){
@@ -201,7 +250,11 @@ int __init init_mod(void) // Required to insmod
         if (test_and_set_bit(0, &once))
                 return 0;
 
+        user_connection = false;
         printk(KERN_INFO "Hello Cruel World\n");
+
+        sema_init( &wr_open_lock, 1);
+        sema_init( &rd_open_lock, 1);
         return register_filesystem(&thunder_type);
 
 }

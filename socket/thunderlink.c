@@ -14,7 +14,8 @@ struct genl_info write_info;
 struct genl_info read_info;
 struct genl_info state_info;
 
-
+char open_buff[4096];
+int buff_size;
 
 // attributes (variables): 
 enum {
@@ -83,23 +84,22 @@ static struct genl_family thunder_gnl_family = {
         .maxattr = THUNDER_A_MAX,       // 
 };
 
-
-void check_received(struct nlattr * na, int cmd){
-        char *mydata;
+int check_received(char * mydata, struct nlattr * na, int cmd){
+        char * this_data;
         if(na){
-                mydata = (char *)nla_data(na);
+                this_data = (char *)nla_data(na);
                 if(mydata == NULL){
                         printk(KERN_INFO "Error whiel receiving data\n");
-
+                        return -1;
                 }else{
-                        printk(KERN_INFO "Received: %s\n", mydata);
+                        printk(KERN_INFO "Received: %s\n", this_data);
+                        return sprintf(mydata, "%s", this_data);
                 }
         }else{
                 printk(KERN_INFO "Error no info->attrs %i\n", cmd);
+                return -1;
         }
 }
-
-
 
 int thunder_send_to_user(struct genl_info *cmd_info, int A_CMD, int C_CMD, const char *str){
         struct sk_buff *skb;
@@ -113,17 +113,12 @@ int thunder_send_to_user(struct genl_info *cmd_info, int A_CMD, int C_CMD, const
         msg_head = genlmsg_put(skb, 0, cmd_info->snd_seq+1,
                         &thunder_gnl_family, 0, (u8) C_CMD);
 
-        //msg_head = genlmsg_put(skb, 0, open_info.snd_seq+1,
-        //                &thunder_gnl_family, 0, THUNDER_C_OPEN);
-
         if(msg_head == NULL){
                 rc = -ENOMEM;
                 printk(KERN_INFO "Error Occured after genlmsg_put\n");
                 return -1;
         }
 
-        //rc = nla_put_string(skb, THUNDER_A_OPEN, "Hello From Kernel");
-        //rc = nla_put_string(skb, A_CMD, "Hello From Kernel");
         rc = nla_put_string(skb, A_CMD, str);
 
         if(rc != 0){
@@ -131,11 +126,7 @@ int thunder_send_to_user(struct genl_info *cmd_info, int A_CMD, int C_CMD, const
                 return -1;
         }
         genlmsg_end(skb, msg_head);
-
-
         rc = genlmsg_unicast(genl_info_net(cmd_info), skb, cmd_info->snd_portid);
-        //rc = genlmsg_unicast(genl_info_net(&open_info), skb, open_info.snd_portid);
-
 
         if( rc != 0){
                 printk(KERN_INFO "Error Occured after genlmsg_unicast\n");
@@ -147,7 +138,6 @@ int thunder_send_to_user(struct genl_info *cmd_info, int A_CMD, int C_CMD, const
 
 int thunder_open_socket(struct sk_buff *skb_2, struct genl_info *info){
         struct nlattr *na;
-        //struct sk_buff *skb;
         int open_cmd = THUNDER_A_OPEN;
         if (info == NULL){
                 printk(KERN_INFO "Got a Null gen_info *info\n");
@@ -166,9 +156,16 @@ int thunder_open_socket(struct sk_buff *skb_2, struct genl_info *info){
         na = info->attrs[open_cmd];
 
         // Test Function
-        check_received(na, open_cmd);
-        //thunder_send_to_user(&open_info, THUNDER_A_OPEN, THUNDER_C_OPEN, "Hello From Kernel Open");
+        buff_size = check_received(open_buff, na, open_cmd);
+        printk(KERN_INFO "Copied YAY\n");
+
+        down(&rd_open_lock);
+        memcpy(open_data, open_buff, buff_size);
+        open_size = buff_size;
+
         printk(KERN_INFO "Thunder_Open Kernal To User\n");
+        up( &rd_open_lock);
+        up( &wr_open_lock); // Release the binary semaphore
         return 0;
 }
 
@@ -188,7 +185,7 @@ int thunder_write_socket(struct sk_buff *skb_2, struct genl_info *info){
         na = info->attrs[open_cmd];
 
         // Test Function
-        check_received(na, open_cmd);
+        gpbuff_size = check_received(gp_buff, na, open_cmd);
 
         printk(KERN_INFO "Thunder_Write Kernal To User\n");
         return 0;
@@ -210,7 +207,7 @@ int thunder_read_socket(struct sk_buff *skb_2, struct genl_info *info){
         na = info->attrs[open_cmd];
 
         // Test Function
-        check_received(na, open_cmd);
+        read_size = check_received(read_data, na, open_cmd);
 
         printk(KERN_INFO "Thunder_Read Kernal To User\n");
         return 0;
@@ -219,6 +216,9 @@ int thunder_read_socket(struct sk_buff *skb_2, struct genl_info *info){
 int thunder_state_cmd(struct sk_buff *skb_2, struct genl_info *info){
         struct nlattr *na;
         int open_cmd = THUNDER_A_MAIN;
+        if( !user_connection ){
+                user_connection = true;
+        }
         if (info == NULL){
                 printk(KERN_INFO "Got a Null gen_info *info\n");
                 return 0;
@@ -231,51 +231,52 @@ int thunder_state_cmd(struct sk_buff *skb_2, struct genl_info *info){
 
         na = info->attrs[open_cmd];
 
-        check_received(na, open_cmd);
+        gpbuff_size = check_received(gp_buff, na, open_cmd);
 
-        //thunder_send_to_user(&state_info, THUNDER_A_MAIN, THUNDER_C_MAIN, "Hello From Kernel State Cmd");
         printk(KERN_INFO "Thunder State Cmd\n");
         return 0;
 }
 
-/*
-struct genl_info open_info;
-struct genl_info write_info;
-struct genl_info read_info;
-struct genl_info state_info; */
-
+// No Magic Numbers
 #define DISPATCH_OPEN 1
 #define DISPATCH_READ 2
 #define DISPATCH_WRITE 3
+#define COMMAND_BYTE 0
+#define FILEID_BYTE 1
 
-void thunder_cmd_dispatch(int cmd, unsigned long operation){
+bool thunder_cmd_dispatch(int cmd, unsigned long operation){
         int CMD_A = THUNDER_A_MAIN;
         int CMD_C = THUNDER_C_MAIN;
         char user_cmds[2];
+
         printk(KERN_INFO "CMD: %i\n", cmd);
+        printk(KERN_INFO "op: %i\n", (int) operation);
+
         if (cmd == DISPATCH_OPEN){
                 printk(KERN_INFO "Open Case\n");
-                user_cmds[0] = (char) DISPATCH_OPEN;
-                user_cmds[1] = (char) operation;
+
+                user_cmds[COMMAND_BYTE] = (char) DISPATCH_OPEN;
+                user_cmds[FILEID_BYTE] = (char) operation;
                 thunder_send_to_user(&state_info, CMD_A, CMD_C, user_cmds); 
         } else if(cmd == DISPATCH_READ) { 
                 printk(KERN_INFO "Read Case\n");
-                user_cmds[0] = (char) DISPATCH_READ;
-                user_cmds[1] = (char) operation;
+
+                user_cmds[COMMAND_BYTE] = (char) DISPATCH_READ;
+                user_cmds[FILEID_BYTE] = (char) operation;
                 thunder_send_to_user(&state_info, CMD_A, CMD_C, user_cmds);
         } else if(cmd == DISPATCH_WRITE) {
                 printk(KERN_INFO "Write Case\n");
-                user_cmds[0] = (char) DISPATCH_WRITE;
-                user_cmds[1] = (char) operation;
+
+                user_cmds[COMMAND_BYTE] = (char) DISPATCH_WRITE;
+                user_cmds[FILEID_BYTE] = (char) operation;
                 thunder_send_to_user(&state_info, CMD_A, CMD_C, user_cmds);
         } else {
-                //thunder_send_to_user();
                 printk(KERN_INFO "Default Choice\n");
+                return true;
         }
+        return true;
 
 }
-
-
 
 //int __init init_mod(void) // Required to insmod
 //{
