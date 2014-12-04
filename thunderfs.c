@@ -11,21 +11,26 @@
 
 #define THUNDER_MAGIC 0x69FF69FF
 
-struct semaphore wr_open_lock;
-struct semaphore rd_open_lock;
-char open_data[4096];
-int open_size;
+#ifndef THUNDER_BUFFERS
 
-char read_data[4096];
-int read_size;
+#define TH_BUFF_SIZE 4096
+struct kernel_buffer {
+        struct semaphore wr_lock;
+        struct semaphore rd_lock;
+        char data_buff[TH_BUFF_SIZE];
+        int buff_size;
+        unsigned long fsize;
+};
 
-char write_data[4096];
-int write_size;
+struct kernel_buffer open_buffer;
+struct kernel_buffer read_buffer;
+struct kernel_buffer write_buffer;
 
 char gp_buff[4096];
 int gpbuff_size;
 
 bool user_connection;
+#endif
 
 #include "./socket/thunderlink.c"
 
@@ -47,59 +52,125 @@ static struct super_operations thunder_s_ops = {
         .show_options   = generic_show_options,
 };
 
+static int thunder_open(struct inode *inod, struct file* filp) {
+        if( !user_connection ){
+                printk(KERN_INFO "open: !user_connection\n");
+                return 0;
+        }
+
+        down( &open_buffer.wr_lock ); // Take the lock for socket reader
+        printk(KERN_INFO "inode_id: %lu\n", inod->i_ino);
+
+        open_buffer.data_buff[0] = (char) DISPATCH_OPEN;
+        open_buffer.buff_size = sprintf(open_buffer.data_buff+1, "%lx", inod->i_ino);
+
+        thunder_cmd_dispatch(DISPATCH_OPEN, &open_buffer);
+
+        down( &open_buffer.wr_lock ); // Wait for the socket read
+        down( &open_buffer.rd_lock ); // take the reader lock
+
+        filp->private_data = (void*) inod->i_ino;
+        inod->i_size = open_buffer.fsize;
+
+        up( &open_buffer.rd_lock );
+        up( &open_buffer.wr_lock );
+
+        printk(KERN_INFO "wr_lock: %i\trd_lock: %i\n", 
+                                open_buffer.wr_lock.count, open_buffer.rd_lock.count);
+        printk(KERN_INFO "thunder_open\n");
+        return 0;
+}
+
+static ssize_t thunder_write(struct file *filp, const char __user *buf, 
+                                        size_t count, loff_t *offset) {
+        unsigned long file_id;
+        unsigned long fsize;
+        int cmd_size;
+        if( !user_connection ){
+                return -EPIPE;
+        }
+        if(*offset != 0)
+                return -EINVAL;
+        if (count > TH_BUFF_SIZE)
+                return -EINVAL;
+        printk(KERN_INFO "Taking write.rd_lock\n");
+        down( &write_buffer.rd_lock );
+        printk(KERN_INFO "Taking write.wr_lock\n");
+        down( &write_buffer.wr_lock );
+        file_id = (unsigned long) filp->private_data;
+
+        write_buffer.data_buff[0] = (char) DISPATCH_WRITE;
+        cmd_size = sprintf(write_buffer.data_buff+1, "%lx", file_id);
+        write_buffer.buff_size = cmd_size + 1;
+
+        if( copy_from_user(write_buffer.data_buff + write_buffer.buff_size, buf, count) )
+                return -EFAULT;
+        write_buffer.buff_size += count;
+
+        printk(KERN_INFO "dropping rd_lock\n");
+        up( &write_buffer.rd_lock); // Release reader lock
+        printk(KERN_INFO "wr_buff.rd_lock: %i\n", write_buffer.rd_lock.count);
+
+        printk(KERN_INFO "Writing: %s\n", write_buffer.data_buff + cmd_size + 1);
+
+        thunder_cmd_dispatch(DISPATCH_WRITE, &write_buffer);
+        down( &write_buffer.wr_lock); // Block When Busy
+        down( &write_buffer.rd_lock);
+        fsize = write_buffer.fsize;
+
+
+        printk(KERN_INFO "thunder_write size: %lu\n\n", write_buffer.fsize);
+
+        up( &write_buffer.rd_lock);
+        up( &write_buffer.wr_lock); // Block When Busy
+        printk(KERN_INFO "wr_lock: %i\trd_lock: %i\n", 
+                                write_buffer.wr_lock.count, write_buffer.rd_lock.count);
+        printk(KERN_INFO "thunder_write");
+        return fsize;
+}
+
 static ssize_t thunder_read(struct file *filp, char __user *buf, size_t count, loff_t *offset) {
-        unsigned long inode_id;
+        unsigned long file_id;
+        int cmd_size;
 
         if( !user_connection ){
                 return -EPIPE;
         }
 
-        inode_id = ( unsigned long ) filp->private_data;
-        down( &wr_open_lock ); // Take the lock to block on the next lock
-        thunder_cmd_dispatch(DISPATCH_OPEN, inode_id);
-        down( &wr_open_lock);
-        down( &rd_open_lock ); // Wait to receive into: char open_data
-        //printk(KERN_INFO "opening: %s", open_data);
-        printk(KERN_INFO "open_size: %i", open_size);
+        file_id = ( unsigned long ) filp->private_data;
+        down( &read_buffer.wr_lock ); // Take the lock to block on the next lock
+        read_buffer.data_buff[0] = (char) DISPATCH_READ;
+        cmd_size = sprintf(read_buffer.data_buff+1, "%lx", file_id);
+        read_buffer.buff_size = cmd_size + 1;
 
-        if(*offset > 60){
+        thunder_cmd_dispatch(DISPATCH_READ, &read_buffer);
+        down( &read_buffer.wr_lock);
+        down( &read_buffer.rd_lock ); // Wait to receive into: char open_data
+
+        printk(KERN_INFO "open_size: %lu\n", read_buffer.fsize);
+        printk(KERN_INFO "count: %lu\n", count);
+
+        if(*offset > read_buffer.fsize){
                 return 0;
         }
-        if(count > 60 - *offset){
-                count = 60 - *offset;
+        if(count > read_buffer.fsize - *offset){
+                count = read_buffer.fsize - *offset;
         }
-        if(copy_to_user( buf, open_data + *offset, count)){
+        if(copy_to_user( buf, read_buffer.data_buff + *offset, count)){
                 printk(KERN_INFO "Bad Address\n");
                 return -EFAULT;
         }
         *offset += count;
-        up(&rd_open_lock);
-        up(&wr_open_lock);
-        printk(KERN_INFO "thunder_read\n");
+        up( &read_buffer.rd_lock );
+        up( &read_buffer.wr_lock );
+        printk(KERN_INFO "wr_lock: %i\trd_lock: %i\n", 
+                                read_buffer.wr_lock.count, read_buffer.rd_lock.count);
+        printk(KERN_INFO "count: %lu\n", count);
+        printk(KERN_INFO "thunder_read\n\n");
         return count;
 }
 
-static ssize_t thunder_write(struct file *filp, const char __user *buf, size_t count, loff_t *offset) {
-        if( !user_connection ){
-                return -EPIPE;
-        }
-        thunder_cmd_dispatch(DISPATCH_WRITE, -1);
-        printk(KERN_INFO "thunder_write\n");
-        return -EPERM;
-}
 
-static int thunder_open(struct inode *inod, struct file* filp) {
-        if( !user_connection ){
-                return -EPIPE;
-        }
-
-        printk(KERN_INFO "inode_id: %i\n", (int) inod->i_ino);
-        filp->private_data = (void*) inod->i_ino;
-        inod->i_size = 60;
-
-        printk(KERN_INFO "thunder_open\n");
-        return 0;
-}
 
 const struct file_operations thunder_file_operations = {
         .read           = thunder_read,
@@ -241,6 +312,17 @@ int init_socket(void) {
         return 0;
 }
 
+void init_semaphores(void){
+        sema_init( &open_buffer.wr_lock, 1);
+        sema_init( &open_buffer.rd_lock, 1);
+
+        sema_init( &read_buffer.wr_lock, 1);
+        sema_init( &read_buffer.rd_lock, 1);
+
+        sema_init( &write_buffer.wr_lock, 1);
+        sema_init( &write_buffer.rd_lock, 1);
+}
+
 int __init init_mod(void) { // Required to insmod
         static unsigned long once;
         int rv = init_socket();
@@ -249,12 +331,10 @@ int __init init_mod(void) { // Required to insmod
         }
         if (test_and_set_bit(0, &once))
                 return 0;
-
         user_connection = false;
-        printk(KERN_INFO "Hello Cruel World\n");
+        init_semaphores();
 
-        sema_init( &wr_open_lock, 1);
-        sema_init( &rd_open_lock, 1);
+        printk(KERN_INFO "Hello Cruel World\n");
         return register_filesystem(&thunder_type);
 
 }

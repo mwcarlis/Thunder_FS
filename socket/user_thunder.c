@@ -228,55 +228,84 @@ int main(){
         char rv[200];
         char ret_mes[200];
         char filedata[4096];
-        int ret_len;
-        int opencount = 0;
-        int readcount = 0;
-        int writecount = 0;
+        unsigned long ret_len;
         ssize_t len;
+        char *init_file = "This is My File\nI like this file because it is mine\n";
+        int init_fsize = sizeof("This is My File\nI like this file because it is mine\n");
+        struct file_system thunder_system;
+
+        char kern_cmd;
+        char *endptr;
+        memset(&filedata, 0, 4096); // Wipe that shit
+
+        init_filesystem( &thunder_system );
+        open_file(&thunder_system, 234680);
+        write_file(&thunder_system, init_file, init_fsize, 234680);
+
+        len = get_file(&thunder_system, filedata, 234680);
+        printf("File:\n%s", filedata);
+        memset(&filedata, 0, len+5);
+
 
         // Initialize the State.
         send_to_thunderfs(&state_cmd, STATE_CMD, init, init_len);
         do{
                 len = get_from_thunderfs(&state_cmd, STATE_CMD, rv);
+                kern_cmd = rv[0];
                 printf("Got Message len: %i\n", (int) len);
 
-                if ( (int) rv[0] == OPEN_CMD){
-                        int digits;
-                        if(opencount == 10){
-                                digits = 1;
-                        }
-                        ssize_t file_len = get_file(filedata, (int) rv[1]);
-                        printf("%s\n", filedata);
-                        buff_size = get_file(buff, -99);
+                if ( (int) kern_cmd == OPEN_CMD){
+                        unsigned long file_id;
+                        unsigned long file_size;
+                        char rv_buff[10];
+                        int fsize;
 
-                        send_to_thunderfs(&open_cmd, OPEN_CMD, filedata, file_len+2);
-                        opencount += 1;
+                        file_id = strtoul( &rv[1], &endptr, 16);
+                        file_size = open_file(&thunder_system, file_id);
 
-                        printf("Confirmed OPEN\n");
-                } else if( (int) rv[0] == READ_CMD){
-                        int digits;
-                        if(readcount == 10){
-                                digits = 1;
-                        }
+                        printf("File ID: %lu\n", file_id);
+                        fsize = sprintf(rv_buff, "%lx\n", file_size); 
+                        printf("RV FSize: %lu\n", file_size);
+                        
+                        send_to_thunderfs(&open_cmd, OPEN_CMD, rv_buff, fsize+2);
+                        printf("Confirmed OPEN\n\n");
 
-                        ret_len = snprintf(ret_mes, 10+digits, "READDATA%i", readcount);
-                        send_to_thunderfs(&read_cmd, READ_CMD, ret_mes, ret_len+2);
-                        readcount += 1;
+                } else if( (int) kern_cmd == READ_CMD){
+                        unsigned long file_id;
+                        int file_len;
+                        file_id = strtoul( &rv[1], &endptr, 16);
+                        printf("File ID: %lu\n", file_id);
 
-                        printf("Confirmed READ\n");
-                } else if( (int) rv[0] == WRITE_CMD ){
-                        int digits = 0;
-                        if(writecount == 10){
-                                digits = 1;
-                        }
+                        file_len = (int) get_file(&thunder_system, filedata, file_id);
+                        printf("data:\n%s-\n", filedata);
+                        //sleep(5);
 
-                        ret_len = snprintf(ret_mes, 11+digits, "WRITEDATA%i", writecount);
-                        send_to_thunderfs(&write_cmd, WRITE_CMD, ret_mes, ret_len+2);
-                        writecount += 1;
+                        send_to_thunderfs(&read_cmd, READ_CMD, filedata, file_len+2);
+                        memset(&filedata, 0, file_len+5);
+                        printf("Confirmed READ\n\n");
 
-                        printf("Confirmed WRITE\n");
+                } else if( (int) kern_cmd == WRITE_CMD ){
+                        unsigned long file_id;
+                        unsigned long file_size;
+                        int fsize;
+                        ssize_t file_len;
+                        char rv_buff[10];
+
+                        file_id = strtoul( &rv[1], &endptr, 16);
+                        printf("File ID: %lu\n", file_id);
+
+                        ret_len = sprintf(ret_mes, "%s", endptr);
+                        printf("%lu\n", ret_len);
+                        file_size = write_file(&thunder_system, 
+                                                ret_mes, ret_len, file_id);
+
+                        fsize = sprintf(rv_buff, "%lx", file_size);
+                        printf("RV FSize: %lu\n", file_size);
+                        
+                        send_to_thunderfs(&write_cmd, WRITE_CMD, rv_buff, fsize+2);
+                        printf("Confirmed WRITE\n\n");
                 } else {
-                        printf("Not Confirmed\n");
+                        printf("Not Confirmed\n\n");
                 }
         } while(1 == 1);
 
@@ -285,3 +314,11 @@ int main(){
 
 
 }
+        //printf("value: 0x%lx\n", value);
+        //sprintf(test, "%lx",value);
+        //new_value = strtoul(test, &endptr, 16);
+        //printf("new_value_16: 0x%lx\n", new_value);
+        //printf("&test: %lx\n", (unsigned long) test);
+        //printf("&test: %lx\n", (unsigned long) &test[4]);
+        //printf("*endptr: %lx\n", (unsigned long) endptr);
+
